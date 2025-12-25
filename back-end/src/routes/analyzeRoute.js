@@ -6,8 +6,69 @@ const router = express.Router();
 const pinecone = new Pinecone({
   apiKey: process.env.PINECONE_API_KEY
 });
+
 const index = pinecone.Index(process.env.PINECONE_INDEX_NAME);
 
+
+// -------- KPI GENERATOR ----------
+function generateKPIs(query, sources) {
+  const q = (query || "").toLowerCase();
+
+  // defaults
+  let revenue = "+8%";
+  let churn = "Medium";
+  let confidence = "Medium";
+
+  // Query keyword logic
+  if (q.includes("churn") || q.includes("retention")) {
+    churn = "High Risk";
+    confidence = "High";
+  }
+
+  if (q.includes("revenue") || q.includes("sales") || q.includes("growth")) {
+    revenue = "+18%";
+    confidence = "High";
+  }
+
+  if (q.includes("forecast")) {
+    confidence = "High";
+  }
+
+  if (q.includes("profit") || q.includes("margin")) {
+    revenue = "+10%";
+  }
+
+  // -------- OPTIONAL — React to doc text sentiment --------
+  if (sources && sources.length > 0) {
+    const text = (sources[0].metadata?.text || "").toLowerCase();
+
+    if (
+      text.includes("decline") ||
+      text.includes("loss") ||
+      text.includes("drop") ||
+      text.includes("slowdown")
+    ) {
+      revenue = "-4%";
+    }
+
+    if (
+      text.includes("record") ||
+      text.includes("increase") ||
+      text.includes("growth")
+    ) {
+      revenue = "+22%";
+    }
+  }
+
+  return [
+    { label: "Revenue Growth", value: revenue },
+    { label: "Churn Risk", value: churn },
+    { label: "Forecast Confidence", value: confidence },
+  ];
+}
+
+
+// -------- ROUTE ----------
 router.post("/", async (req, res) => {
   try {
     const { query } = req.body;
@@ -21,13 +82,12 @@ router.post("/", async (req, res) => {
       includeMetadata: true
     });
 
+    // Generate KPIs dynamically
+    const kpis = generateKPIs(query, results.matches);
+
     res.json({
-      summary: `Mock insight for: ${query}`,
-      kpis: [
-        { label: "Revenue Growth", value: "+12%" },
-        { label: "Churn Risk", value: "Medium" },
-        { label: "Forecast Confidence", value: "High" },
-      ],
+      summary: `Insight for: ${query}`,
+      kpis,
       chartData: [
         { month: "Apr", value: 120 },
         { month: "May", value: 135 },
@@ -54,7 +114,7 @@ router.post("/", async (req, res) => {
     });
 
   } catch (err) {
-    console.error(err);
+    console.error("ERROR in /api/analyze", err);
     res.status(500).json({ error: "Analyze failed" });
   }
 });

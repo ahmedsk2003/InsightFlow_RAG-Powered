@@ -37,6 +37,10 @@ function App() {
   const [uploadError, setUploadError] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [suggestedQuestions, setSuggestedQuestions] = useState([])
+  
+
+
   const [insight, setInsight] = useState({
     summary: '',
     kpis: [],
@@ -45,6 +49,7 @@ function App() {
     sources: [],
   })
   const inputRef = useRef(null)
+  const queryRef = useRef(null)   
   const location = useLocation()
 //Upload Api function
   const uploadFilesToApi = async (selectedFiles) => {
@@ -95,10 +100,34 @@ function App() {
       try {
         setLoading(true)
         setError('')
+
         const uploaded = await uploadFilesToApi(accepted)
+
         setUploadedFiles(uploaded.map((f) => ({ name: f.name, size: f.size, id: f.id })))
         setUploadedFileIds(uploaded.map((f) => f.id))
-      } catch (err) {
+      
+        const fd = new FormData()
+        accepted.forEach(f => fd.append("file", f))   //  IMPORTANT
+
+        const previewRes = await fetch(`${API_BASE}/preview`, {
+        method: "POST",
+         body: fd
+       })
+
+         const preview = await previewRes.json()
+        setInsight(prev => ({
+      ...prev,
+      kpis: preview.kpis || [],
+      chartData: preview.chartData || [],
+      // optional:
+      sources: uploaded.map(f => f.name)
+    }))
+
+    if (preview.suggested) {
+      setSuggestedQuestions(preview.suggested)
+    }
+
+   } catch (err) {
         console.error(err)
         setError('Upload failed. Please try again.')
       } finally {
@@ -122,14 +151,19 @@ function App() {
     setLoading(true)
     setError('')
     try {
-      const result = await runAnalyzeApi(query, uploadedFileIds)
-      setInsight({
-        summary: result.summary || '',
-        kpis: result.kpis || [],
-        recommendations: result.recommendations || [],
-        chartData: result.chartData || [],
-        sources: result.sources || [],
-      })
+
+          const result = await runAnalyzeApi(query, uploadedFileIds)
+
+           setInsight({
+            summary: result.summary || '',
+            kpis: result.kpis || [],
+            recommendations: result.recommendations || [],
+            chartData: result.chartData || [],
+            sources: result.sources || [],
+    })
+
+setSuggestedQuestions(result.suggestedQuestions || [])
+
     } catch (err) {
       console.error(err)
       setError('Analysis failed. Please try again.')
@@ -223,14 +257,17 @@ function App() {
             path="/"
             element={
               <section className="prompt-card">
+
           <div className="prompt-input">
             <input
-              type="text"
-              placeholder="Predict sales for Q4 based on historical trends..."
-              aria-label="Insight prompt"
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-            />
+            ref={queryRef}   // ← add this
+            type="text"
+            placeholder="Predict sales for Q4 based on historical trends..."
+            aria-label="Insight prompt"
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+  />
+            
             <button
               className="primary-btn"
               onClick={() => handleAnalyze()}
@@ -329,6 +366,8 @@ function App() {
                 </div>
               ))}
             </div>
+
+            {suggestedQuestions.length > 0 && (
             <div className="suggested">
               <h4>Suggested Questions</h4>
               <div className="suggested-actions">
@@ -336,17 +375,35 @@ function App() {
                   <button
                     key={question}
                     className="secondary-btn"
-                    onClick={() => {
+
+                   onClick={() => {
                       setPrompt(question)
+
+                     setTimeout(() => {
+                      if (queryRef.current) {
+                        queryRef.current.scrollIntoView({
+                          behavior: "smooth",
+                          block: "center"
+                        })
+                        queryRef.current.focus()
+                        // optional → highlight text
+                        // queryRef.current.select()
+                      }
+                    }, 80)
+
                       handleAnalyze(question)
                     }}
-                  >
+
+                                      >
+
                     {question}
                   </button>
                 ))}
               </div>
             </div>
+            )}
           </div>
+
 
           <div className="insight-panel">
             <div className="panel-header">
@@ -354,14 +411,38 @@ function App() {
             </div>
 
             <div className="insight-body">
-              <div className="insight-text">
-                <h2>{insight.summary || 'Awaiting analysis...'}</h2>
-                {activeQuestion && (
-                  <p className="active-question">
-                    Running insight for: <span>{activeQuestion}</span>
-                  </p>
-                )}
-              </div>
+
+           <div className="insight-text">
+  {!insight.summary ? (
+    <p>Awaiting analysis...</p>
+  ) : (
+    <ul style={{ 
+      margin: 0,
+      paddingLeft: "18px",
+      fontSize: "15px",
+      fontWeight: 400,
+      lineHeight: "1.5"
+    }}>
+      {insight.summary
+        .split('\n')
+        .filter(line => line.trim() !== "")
+        .map((line, i) => {
+          // remove bullets, *, -, •, numbers like 1. 2)
+          const cleaned = line
+            .trim()
+            .replace(/^[\s•*-\d\)\.]+/, "");
+
+          return (
+            <li key={i} style={{ marginBottom: "6px" }}>
+              {cleaned}
+            </li>
+          );
+        })}
+    </ul>
+  )}
+</div>
+
+
 
               <div className="chart-section">
                 <div className="chart-section-header">
@@ -382,14 +463,14 @@ function App() {
                 </div>
               </div>
 
-              <div className="recommendations">
+              {/* <div className="recommendations">
                 <h4>Recommendations</h4>
                 <ul>
                   {recommendationsToShow.map((rec, idx) => (
                     <li key={idx}>{rec}</li>
                   ))}
                 </ul>
-              </div>
+              </div> */}
 
               <div className="data-sources">
                 <h4>Data Sources:</h4>

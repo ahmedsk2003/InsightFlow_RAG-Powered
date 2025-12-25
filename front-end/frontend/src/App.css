@@ -20,6 +20,13 @@
   box-shadow: 0 12px 40px rgba(14, 42, 86, 0.25);
 }
 
+.insight-text ul li {
+  margin-bottom: 6px;
+  font-size: 15px;
+  font-weight: 400;
+}
+
+
 .brand {
   display: flex;
   align-items: center;

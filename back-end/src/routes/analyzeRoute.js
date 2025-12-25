@@ -1,5 +1,6 @@
 import express from "express";
 import { Pinecone } from "@pinecone-database/pinecone";
+import ollama from "ollama";
 
 const router = express.Router();
 
@@ -14,12 +15,10 @@ const index = pinecone.Index(process.env.PINECONE_INDEX_NAME);
 function generateKPIs(query, sources) {
   const q = (query || "").toLowerCase();
 
-  // defaults
   let revenue = "+8%";
   let churn = "Medium";
   let confidence = "Medium";
 
-  // Query keyword logic
   if (q.includes("churn") || q.includes("retention")) {
     churn = "High Risk";
     confidence = "High";
@@ -30,34 +29,18 @@ function generateKPIs(query, sources) {
     confidence = "High";
   }
 
-  if (q.includes("forecast")) {
-    confidence = "High";
-  }
+  if (q.includes("forecast")) confidence = "High";
 
-  if (q.includes("profit") || q.includes("margin")) {
-    revenue = "+10%";
-  }
+  if (q.includes("profit") || q.includes("margin")) revenue = "+10%";
 
-  // -------- OPTIONAL — React to doc text sentiment --------
   if (sources && sources.length > 0) {
     const text = (sources[0].metadata?.text || "").toLowerCase();
 
-    if (
-      text.includes("decline") ||
-      text.includes("loss") ||
-      text.includes("drop") ||
-      text.includes("slowdown")
-    ) {
+    if (text.includes("decline") || text.includes("loss") || text.includes("drop"))
       revenue = "-4%";
-    }
 
-    if (
-      text.includes("record") ||
-      text.includes("increase") ||
-      text.includes("growth")
-    ) {
+    if (text.includes("record") || text.includes("increase") || text.includes("growth"))
       revenue = "+22%";
-    }
   }
 
   return [
@@ -66,6 +49,47 @@ function generateKPIs(query, sources) {
     { label: "Forecast Confidence", value: confidence },
   ];
 }
+
+
+// -------- SUGGESTED QUESTIONS ----------
+function generateSuggestedQuestions(text, query) {
+  text = (text || "").toLowerCase();
+  query = (query || "").toLowerCase();
+
+  const questions = [];
+
+  if (text.includes("revenue") || text.includes("sales"))
+    questions.push(
+      "What is the monthly revenue trend?",
+      "Which regions generate the highest revenue?",
+      "What are the key drivers of revenue growth?"
+    );
+
+  if (text.includes("customer") || text.includes("segment"))
+    questions.push(
+      "Which customer segments are the most profitable?",
+      "Which customers have the highest churn risk?"
+    );
+
+  if (text.includes("forecast") || query.includes("forecast"))
+    questions.push("How reliable is the forecast?", "What risks may impact the forecast?");
+
+  if (text.includes("cost") || text.includes("expense"))
+    questions.push(
+      "Which areas contribute most to cost?",
+      "How can we optimize operational expenses?"
+    );
+
+  if (questions.length === 0)
+    questions.push(
+      "Summarize key risks and opportunities",
+      "What KPIs should we track from this data?",
+      "Generate 3 strategic recommendations"
+    );
+
+  return questions;
+}
+
 
 
 // -------- ROUTE ----------
@@ -82,12 +106,49 @@ router.post("/", async (req, res) => {
       includeMetadata: true
     });
 
-    // Generate KPIs dynamically
-    const kpis = generateKPIs(query, results.matches);
+    const matches = results.matches || [];
 
+    // KPIs
+    const kpis = generateKPIs(query, matches);
+
+    // Suggested Questions
+    const firstDocText = matches[0]?.metadata?.text || "";
+    const suggestedQuestions = generateSuggestedQuestions(firstDocText, query);
+
+    // -------- AI SUMMARY FROM OLLAMA ----------
+    let aiAnswer = `Here are some insights related to "${query}".`;
+
+    try {
+      const contextText = matches
+        .map(m => m.metadata?.text?.slice(0, 600) || "")
+        .join("\n\n");
+
+      const ollamaResponse = await ollama.chat({
+        model: "llama3",
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a helpful data insights assistant. Answer clearly in 3–6 bullet points."
+          },
+          {
+            role: "user",
+            content: `Question: ${query}\n\nRelevant data:\n${contextText}`
+          }
+        ]
+      });
+
+      aiAnswer = ollamaResponse.message?.content || aiAnswer;
+    } catch (e) {
+      console.error("Ollama failed — using fallback text", e);
+    }
+
+
+    // -------- SEND RESPONSE ----------
     res.json({
-      summary: `Insight for: ${query}`,
+      summary: aiAnswer,
       kpis,
+      suggestedQuestions,
       chartData: [
         { month: "Apr", value: 120 },
         { month: "May", value: 135 },
@@ -107,9 +168,9 @@ router.post("/", async (req, res) => {
         "Reduce CAC by focusing optimized channels",
         "Invest in retention programs"
       ],
-      sources: results.matches.map(m => ({
-        source: m.metadata.source,
-        snippet: m.metadata.text.slice(0, 200)
+      sources: matches.map(m => ({
+        source: m.metadata?.source,
+        snippet: m.metadata?.text?.slice(0, 200) || ""
       }))
     });
 

@@ -1,0 +1,514 @@
+import { useRef, useState } from 'react'
+import { Link, Route, Routes, useLocation } from 'react-router-dom'
+import './App.css'
+import About from './pages/About.jsx'
+import Contact from './pages/Contact.jsx'
+
+const salesYearPoints = [
+  { label: 'Apr', value: 120 },
+  { label: 'May', value: 135 },
+  { label: 'Jun', value: 155 },
+  { label: 'Jul', value: 165 },
+  { label: 'Aug', value: 180 },
+  { label: 'Sep', value: 190 },
+  { label: 'Oct', value: 205 },
+  { label: 'Nov', value: 220 },
+  { label: 'Dec', value: 240 },
+  { label: 'Jan', value: 230 },
+  { label: 'Feb', value: 245 },
+  { label: 'Mar', value: 260 },
+]
+
+const suggestedQuestions = [
+  'Compare regional performance',
+  'What if we increase marketing budget by 10%?',
+  'Which products drive the highest Q4 margin?',
+  'Identify segments with rising churn risk',
+  'Seasonality impact over the last 3 years',
+]
+
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000/api'
+
+function App() {
+  const [uploadedFiles, setUploadedFiles] = useState([])
+  const [uploadedFileIds, setUploadedFileIds] = useState([])
+  const [prompt, setPrompt] = useState('')
+  const [activeQuestion, setActiveQuestion] = useState('')
+  const [uploadError, setUploadError] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [insight, setInsight] = useState({
+    summary: '',
+    kpis: [],
+    recommendations: [],
+    chartData: [],
+    sources: [],
+  })
+  const inputRef = useRef(null)
+  const location = useLocation()
+//Upload Api function
+  const uploadFilesToApi = async (selectedFiles) => {
+    const fd = new FormData()
+    selectedFiles.forEach((file) => fd.append('files', file))
+    const res = await fetch(`${API_BASE}/upload`, {
+      method: 'POST',
+      body: fd,
+    })
+    if (!res.ok) throw new Error('Upload failed')
+    const data = await res.json()
+    return data.files || []
+  }
+
+  const runAnalyzeApi = async (query, fileIds) => {
+    const res = await fetch(`${API_BASE}/analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, files: fileIds }),
+    })
+    if (!res.ok) throw new Error('Analyze failed')
+    return res.json()
+  }
+//For uploading files
+  const handleFiles = async (fileList) => {
+    const allowedExtensions = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv']
+    const filesArray = Array.from(fileList || [])
+
+    const accepted = []
+    let rejected = false
+
+    filesArray.forEach((file) => {
+      const ext = (file.name.split('.').pop() || '').toLowerCase()
+      if (allowedExtensions.includes(ext)) {
+        accepted.push(file)
+        //   {
+        //   name: file.name,
+        //   size: file.size,
+        //   id: crypto.randomUUID(),
+        // }
+     
+      } else {
+        rejected = true
+      }
+    })
+
+    if (accepted.length) {
+      try {
+        setLoading(true)
+        setError('')
+        const uploaded = await uploadFilesToApi(accepted)
+        setUploadedFiles(uploaded.map((f) => ({ name: f.name, size: f.size, id: f.id })))
+        setUploadedFileIds(uploaded.map((f) => f.id))
+      } catch (err) {
+        console.error(err)
+        setError('Upload failed. Please try again.')
+      } finally {
+        setLoading(false)
+      }
+    }
+    setUploadError(
+      rejected ? 'Only PDF, DOC/DOCX, XLS/XLSX, and CSV files are supported.' : ''
+    )
+  }
+
+  const handleDrop = (event) => {
+    event.preventDefault()
+    handleFiles(event.dataTransfer.files)
+  }
+
+  const handleAnalyze = async (text) => {
+    const query = (text ?? prompt).trim()
+    if (!query) return
+    setActiveQuestion(query)
+    setLoading(true)
+    setError('')
+    try {
+      const result = await runAnalyzeApi(query, uploadedFileIds)
+      setInsight({
+        summary: result.summary || '',
+        kpis: result.kpis || [],
+        recommendations: result.recommendations || [],
+        chartData: result.chartData || [],
+        sources: result.sources || [],
+      })
+    } catch (err) {
+      console.error(err)
+      setError('Analysis failed. Please try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const formatSize = (bytes) => {
+    if (bytes === 0) return '0 B'
+    const sizes = ['B', 'KB', 'MB', 'GB']
+    const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), sizes.length - 1)
+    return `${(bytes / 1024 ** i).toFixed(i === 0 ? 0 : 1)} ${sizes[i]}`
+  }
+
+  const kpisToShow =
+    insight.kpis.length > 0
+      ? insight.kpis
+      : [
+          { label: 'Revenue Growth', value: '+12%' },
+          { label: 'Churn Risk', value: 'Medium' },
+          { label: 'Forecast Confidence', value: 'High' },
+        ]
+
+  const chartPoints =
+    insight.chartData.length > 0
+      ? insight.chartData.map((p) => ({ label: p.month, value: p.value }))
+      : salesYearPoints
+
+  const recommendationsToShow =
+    insight.recommendations.length > 0
+      ? insight.recommendations
+      : ['Awaiting analysis to generate recommendations.']
+
+  // const sourcesToShow =
+  //   insight.sources.length > 0
+  //     ? insight.sources
+  //     : uploadedFiles.length > 0
+  //       ? uploadedFiles.map((f) => f.name)
+  //       : ['No sources yet']
+  const sourcesToShow =
+  (insight.sources && insight.sources.length > 0
+    ? insight.sources
+    : uploadedFiles.length > 0
+    ? uploadedFiles.map((f) => f.name)
+    : ['No sources yet']
+  ).map((s) =>
+    typeof s === 'string'
+      ? { source: s, snippet: '' }
+      : s
+  );
+
+
+  return (
+    <div className="app">
+      <header className="topbar">
+        <div className="brand">
+          <div className="brand-icon">
+            <span className="pulse-dot" />
+            <span className="pulse-dot secondary" />
+          </div>
+          <span className="brand-name">InsightFlow AI</span>
+        </div>
+        <nav className="main-nav">
+          <Link className="nav-link" to="/">
+            Dashboard
+          </Link>
+          <Link className="nav-link" to="/about">
+            About Us
+          </Link>
+          <Link className="nav-link" to="/contact">
+            Contact Us
+          </Link>
+        </nav>
+        <div className="top-actions">
+          <button className="ghost-btn" aria-label="Notifications">
+            <span className="icon">🔔</span>
+          </button>
+          <button className="ghost-btn" aria-label="Settings">
+            <span className="icon">⚙️</span>
+          </button>
+          <div className="avatar" aria-label="Profile">
+            <span>JD</span>
+          </div>
+        </div>
+      </header>
+
+      <main className="content">
+        <Routes>
+          <Route
+            path="/"
+            element={
+              <section className="prompt-card">
+          <div className="prompt-input">
+            <input
+              type="text"
+              placeholder="Predict sales for Q4 based on historical trends..."
+              aria-label="Insight prompt"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+            />
+            <button
+              className="primary-btn"
+              onClick={() => handleAnalyze()}
+              disabled={loading}
+            >
+              {loading ? 'Working...' : 'Analyze'}
+            </button>
+          </div>
+          <section
+            className="upload-card"
+            onDrop={handleDrop}
+            onDragOver={(e) => e.preventDefault()}
+            onClick={() => inputRef.current?.click()}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                inputRef.current?.click()
+              }
+            }}
+          >
+            <div className="upload-icon">📂</div>
+            <div className="upload-text">
+              <p className="upload-title">Upload data sources</p>
+              <p className="upload-sub">
+                Drop PDF, DOC/DOCX, XLS/XLSX, or CSV files, or browse to attach
+              </p>
+            </div>
+            <button className="primary-btn ghost">Browse files</button>
+            <input
+              ref={inputRef}
+              type="file"
+              multiple
+              accept=".pdf,.doc,.docx,.xls,.xlsx,.csv"
+              onChange={(e) => handleFiles(e.target.files)}
+              className="hidden-input"
+            />
+          </section>
+
+          {uploadError && <p className="upload-error">{uploadError}</p>}
+          {error && <p className="upload-error">{error}</p>}
+
+          {uploadedFiles.length > 0 && (
+            <div className="upload-list">
+              <div className="upload-list-header">Attached files</div>
+              <ul>
+                {uploadedFiles.map((file) => (
+                  <li key={file.id}>
+                    <div className="file-name">{file.name}</div>
+                    <div className="file-size">{formatSize(file.size)}</div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
+            }
+          />
+          <Route
+            path="/about"
+            element={
+              <section className="page-shell">
+                <About />
+              </section>
+            }
+          />
+          <Route
+            path="/contact"
+            element={
+              <section className="page-shell">
+                <Contact />
+              </section>
+            }
+          />
+        </Routes>
+
+        {location.pathname === '/' && (
+          <section className="dashboard">
+          <div className="kpi-panel">
+            <div className="panel-header">
+              <h3>KPI Metric Cards</h3>
+              <button className="link-btn">Show seasonal trends</button>
+            </div>
+            <div className="kpi-cards">
+              {kpisToShow.map((kpi, idx) => (
+                <div
+                  key={kpi.label}
+                  className={`kpi-card ${idx === 0 ? 'primary' : idx === 2 ? 'subtle' : ''}`}
+                >
+                  <span className="icon-box">📊</span>
+                  <div>
+                    <p className="kpi-value">{kpi.value}</p>
+                    <p className="kpi-label">{kpi.label}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="suggested">
+              <h4>Suggested Questions</h4>
+              <div className="suggested-actions">
+                {suggestedQuestions.map((question) => (
+                  <button
+                    key={question}
+                    className="secondary-btn"
+                    onClick={() => {
+                      setPrompt(question)
+                      handleAnalyze(question)
+                    }}
+                  >
+                    {question}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="insight-panel">
+            <div className="panel-header">
+              <h3>Insight Output Card</h3>
+            </div>
+
+            <div className="insight-body">
+              <div className="insight-text">
+                <h2>{insight.summary || 'Awaiting analysis...'}</h2>
+                {activeQuestion && (
+                  <p className="active-question">
+                    Running insight for: <span>{activeQuestion}</span>
+                  </p>
+                )}
+              </div>
+
+              <div className="chart-section">
+                <div className="chart-section-header">
+                  <h4>Company Sales (Past 12 Months)</h4>
+                </div>
+                <div className="chart">
+                  <Chart points={chartPoints} />
+                </div>
+                <div className="chart-legend">
+                  <div className="legend-item">
+                    <span className="legend-swatch legend-area" />
+                    <span>Sales area</span>
+                  </div>
+                  <div className="legend-item">
+                    <span className="legend-swatch legend-line" />
+                    <span>Sales line</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="recommendations">
+                <h4>Recommendations</h4>
+                <ul>
+                  {recommendationsToShow.map((rec, idx) => (
+                    <li key={idx}>{rec}</li>
+                  ))}
+                </ul>
+              </div>
+
+              <div className="data-sources">
+                <h4>Data Sources:</h4>
+                <div className="source-actions">
+                  
+                  {/* {sourcesToShow.map((source, idx) => (
+                    <button key={idx} className="primary-btn ghost">
+                      {source}
+                    </button>
+                  ))} */}
+                    {sourcesToShow.map((s, idx) => (
+                     <button key={idx} className="primary-btn ghost">
+                      {s.source}
+                     </button>
+                  ))}
+
+
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+        )}
+      </main>
+    </div>
+  )
+}
+
+function Chart({ points }) {
+  const viewWidth = 760
+  const viewHeight = 360
+  const paddingX = 30
+  const paddingY = 28
+  const innerWidth = viewWidth - paddingX * 2
+  const innerHeight = viewHeight - paddingY * 2
+  const maxValue = Math.max(...points.map((p) => p.value)) || 1
+  const minValue = Math.min(...points.map((p) => p.value)) || 0
+  const range = Math.max(maxValue - minValue, 1)
+  const stepX = innerWidth / Math.max(points.length - 1, 1)
+  const yLabel = 'Revenue ($K)'
+  const xLabel = 'Month'
+
+  const pathPoints = points
+    .map((p, idx) => {
+      const x = paddingX + idx * stepX
+      const y = paddingY + innerHeight - ((p.value - minValue) / range) * innerHeight
+      return `${x},${y}`
+    })
+    .join(' ')
+
+  const areaPath = `
+    M ${paddingX} ${paddingY + innerHeight}
+    L ${pathPoints}
+    L ${paddingX + innerWidth} ${paddingY + innerHeight}
+    Z
+  `
+
+  return (
+    <svg
+      className="chart-svg"
+      viewBox={`0 0 ${viewWidth} ${viewHeight}`}
+      preserveAspectRatio="none"
+      role="img"
+      aria-label="Revenue trend chart"
+    >
+      <g className="grid-lines">
+        {[0, 0.25, 0.5, 0.75, 1].map((fraction) => (
+          <line
+            key={fraction}
+            x1="0"
+            y1={paddingY + innerHeight * fraction}
+            x2={viewWidth}
+            y2={paddingY + innerHeight * fraction}
+          />
+        ))}
+      </g>
+      <path className="chart-area" d={areaPath} />
+      <polyline className="chart-line" points={pathPoints} />
+      {points.map((point, idx) => (
+        <g key={point.label} className="chart-point">
+          <circle
+            cx={paddingX + idx * stepX}
+            cy={paddingY + innerHeight - ((point.value - minValue) / range) * innerHeight}
+            r="6"
+          />
+        </g>
+      ))}
+      <g className="axis-labels">
+        {points.map((point, idx) => (
+          <text
+            key={point.label}
+            x={paddingX + idx * stepX}
+            y={paddingY + innerHeight + 20}
+            textAnchor="middle"
+          >
+            {point.label}
+          </text>
+        ))}
+      </g>
+
+      <text
+        className="axis-title y-axis-title"
+        x={-viewHeight / 2}
+        y={14}
+        transform="rotate(-90)"
+        textAnchor="middle"
+      >
+        {yLabel}
+      </text>
+      <text
+        className="axis-title x-axis-title"
+        x={paddingX + innerWidth / 2}
+        y={viewHeight - 4}
+        textAnchor="middle"
+      >
+        {xLabel}
+      </text>
+    </svg>
+  )
+}
+
+export default App

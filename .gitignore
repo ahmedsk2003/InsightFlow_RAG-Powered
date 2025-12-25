@@ -1,0 +1,29 @@
+# Environment files
+.env
+**/.env
+
+# Node modules (in ANY folder)
+node_modules/
+**/node_modules/
+
+# Python virtual envs
+.venv/
+venv/
+
+# Build / cache
+dist/
+build/
+.next/
+.cache/
+
+# Uploads / temp
+uploads/
+tmp/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# OS/editor junk
+.DS_Store
+Thumbs.db

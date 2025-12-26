@@ -58,8 +58,8 @@ router.post("/", upload.array("files"), async (req, res) => {
           values: fakeEmbedding(384),
           metadata: {
             source: file.originalname,
-            text: fileText,
-            chartData, // << NEW — may be []
+            text: fileText
+            
           },
         },
       ]);

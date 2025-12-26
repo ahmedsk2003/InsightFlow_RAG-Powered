@@ -95,45 +95,54 @@ function App() {
         rejected = true
       }
     })
+/////
 
-    if (accepted.length) {
-      try {
-        setLoading(true)
-        setError('')
 
-        const uploaded = await uploadFilesToApi(accepted)
+   if (accepted.length) {
+  try {
+    setLoading(true)
+    setError('')
 
-        setUploadedFiles(uploaded.map((f) => ({ name: f.name, size: f.size, id: f.id })))
-        setUploadedFileIds(uploaded.map((f) => f.id))
-      
-        const fd = new FormData()
-        accepted.forEach(f => fd.append("file", f))   //  IMPORTANT
+    const uploaded = await uploadFilesToApi(accepted)
 
-        const previewRes = await fetch(`${API_BASE}/preview`, {
-        method: "POST",
-         body: fd
-       })
+    setUploadedFiles(uploaded.map(f => ({
+      name: f.name,
+      size: f.size,
+      id: f.id
+    })))
 
-         const preview = await previewRes.json()
-        setInsight(prev => ({
+    setUploadedFileIds(uploaded.map(f => f.id))
+
+    // Request preview (headers → charts → suggested Qs)
+    const fd = new FormData()
+    accepted.forEach(f => fd.append("file", f))
+
+    const previewRes = await fetch(`${API_BASE}/preview`, {
+      method: "POST",
+      body: fd
+    })
+
+    const preview = await previewRes.json()
+
+    // ONLY update using preview if available
+    setInsight(prev => ({
       ...prev,
-      kpis: preview.kpis || [],
-      chartData: preview.chartData || [],
-      // optional:
-      sources: uploaded.map(f => f.name)
+      kpis: preview.kpis || prev.kpis,
+      chartData: preview.chartData || prev.chartData
     }))
 
     if (preview.suggested) {
       setSuggestedQuestions(preview.suggested)
     }
 
-   } catch (err) {
-        console.error(err)
-        setError('Upload failed. Please try again.')
-      } finally {
-        setLoading(false)
-      }
-    }
+  } catch (err) {
+    console.error(err)
+    setError('Upload failed. Please try again.')
+  } finally {
+    setLoading(false)
+  }
+}
+
     setUploadError(
       rejected ? 'Only PDF, DOC/DOCX, XLS/XLSX, and CSV files are supported.' : ''
     )
@@ -179,19 +188,10 @@ setSuggestedQuestions(result.suggestedQuestions || [])
     return `${(bytes / 1024 ** i).toFixed(i === 0 ? 0 : 1)} ${sizes[i]}`
   }
 
-  const kpisToShow =
-    insight.kpis.length > 0
-      ? insight.kpis
-      : [
-          { label: 'Revenue Growth', value: '+12%' },
-          { label: 'Churn Risk', value: 'Medium' },
-          { label: 'Forecast Confidence', value: 'High' },
-        ]
+  const kpisToShow = insight.kpis || []
 
-  const chartPoints =
-    insight.chartData.length > 0
-      ? insight.chartData.map((p) => ({ label: p.month, value: p.value }))
-      : salesYearPoints
+ const chartPoints = insight.chartData || []
+
 
   const recommendationsToShow =
     insight.recommendations.length > 0
@@ -353,19 +353,28 @@ setSuggestedQuestions(result.suggestedQuestions || [])
               <button className="link-btn">Show seasonal trends</button>
             </div>
             <div className="kpi-cards">
-              {kpisToShow.map((kpi, idx) => (
-                <div
-                  key={kpi.label}
-                  className={`kpi-card ${idx === 0 ? 'primary' : idx === 2 ? 'subtle' : ''}`}
-                >
-                  <span className="icon-box">📊</span>
-                  <div>
-                    <p className="kpi-value">{kpi.value}</p>
-                    <p className="kpi-label">{kpi.label}</p>
-                  </div>
+
+          {(!kpisToShow || kpisToShow.length === 0) ? (
+            <p style={{ opacity: 0.6 }}>
+              No KPIs yet — upload a file or ask a question.
+            </p>
+          ) : (
+            kpisToShow.map((kpi, idx) => (
+              <div
+                key={kpi.label}
+                className={`kpi-card ${idx === 0 ? 'primary' : idx === 2 ? 'subtle' : ''}`}
+              >
+                <span className="icon-box">📊</span>
+                <div>
+                  <p className="kpi-value">{kpi.value}</p>
+                  <p className="kpi-label">{kpi.label}</p>
                 </div>
-              ))}
-            </div>
+              </div>
+            ))
+          )}
+
+        </div> 
+
 
             {suggestedQuestions.length > 0 && (
             <div className="suggested">
@@ -448,9 +457,19 @@ setSuggestedQuestions(result.suggestedQuestions || [])
                 <div className="chart-section-header">
                   <h4>Company Sales (Past 12 Months)</h4>
                 </div>
-                <div className="chart">
+                  <div className="chart">
+
+                {(!chartPoints || chartPoints.length === 0) ? (
+                  <p style={{ opacity: 0.6 }}>
+                    No chart data available yet.
+                  </p>
+                ) : (
                   <Chart points={chartPoints} />
-                </div>
+                )}
+
+              </div>
+
+
                 <div className="chart-legend">
                   <div className="legend-item">
                     <span className="legend-swatch legend-area" />

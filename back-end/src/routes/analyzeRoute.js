@@ -102,7 +102,7 @@ router.post("/", async (req, res) => {
 
     const results = await index.query({
       vector,
-      topK: 3,
+      topK: 1,
       includeMetadata: true
     });
 
@@ -114,41 +114,50 @@ router.post("/", async (req, res) => {
     // Suggested Questions
     const firstDocText = matches[0]?.metadata?.text || "";
     const suggestedQuestions = generateSuggestedQuestions(firstDocText, query);
+//////////
+   let aiAnswer = `Here are some insights related to "${query}".`;
 
-    // -------- AI SUMMARY FROM OLLAMA ----------
-    let aiAnswer = `Here are some insights related to "${query}".`;
+try {
 
-    try {
-      const contextText = matches
-        .map(m => m.metadata?.text?.slice(0, 600) || "")
-        .join("\n\n");
+  // ⏬ keep only 1 match + 300 chars
+  const contextText = matches[0]?.metadata?.text?.slice(0, 300) || "";
 
-      const ollamaResponse = await ollama.chat({
-        model: "llama3",
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are a helpful data insights assistant. Answer clearly in 3–6 bullet points."
-          },
-          {
-            role: "user",
-            content: `Question: ${query}\n\nRelevant data:\n${contextText}`
-          }
-        ]
-      });
+  const ollamaResponse = await ollama.chat({
+    model: "llama3.2:3b",            // ✅ FAST MODEL
+    options: {
+      num_predict: 200               // ✅ limit output size
+    },
+    messages: [
+      {
+        role: "system",
+        content: "You are a helpful data insights assistant. Answer clearly in 3–6 short bullet points."
+      },
+      {
+        role: "user",
+        content: `Question: ${query}\n\nRelevant data:\n${contextText}`
+      }
+    ]
+  });
 
-      aiAnswer = ollamaResponse.message?.content || aiAnswer;
-    } catch (e) {
-      console.error("Ollama failed — using fallback text", e);
-    }
+  aiAnswer = ollamaResponse.message?.content || aiAnswer;
+
+} catch (e) {
+  console.error("Ollama failed — using fallback text", e);
+}
+
 
 
     // -------- SEND RESPONSE ----------
     res.json({
-      summary: aiAnswer,
-      kpis,
-      suggestedQuestions,
+        summary: aiAnswer,
+        kpis,
+        suggestedQuestions,
+
+        chartTitle: query
+        ? `Trend Analysis Based On: ${query}`
+        : "Trend Visualization From Uploaded Data",
+
+
       chartData: [
         { month: "Apr", value: 120 },
         { month: "May", value: 135 },

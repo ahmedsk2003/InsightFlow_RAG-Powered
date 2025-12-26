@@ -41,13 +41,14 @@ function App() {
   
 
 
-  const [insight, setInsight] = useState({
-    summary: '',
-    kpis: [],
-    recommendations: [],
-    chartData: [],
-    sources: [],
-  })
+ const [insight, setInsight] = useState({
+  summary: '',
+  kpis: [],
+  recommendations: [],
+  chartData: [],
+  sources: [],
+  chartTitle: ''
+})
   const inputRef = useRef(null)
   const queryRef = useRef(null)   
   const location = useLocation()
@@ -154,32 +155,33 @@ function App() {
   }
 
   const handleAnalyze = async (text) => {
-    const query = (text ?? prompt).trim()
-    if (!query) return
-    setActiveQuestion(query)
-    setLoading(true)
-    setError('')
-    try {
+  const query = (text ?? prompt).trim()
+  if (!query) return
 
-          const result = await runAnalyzeApi(query, uploadedFileIds)
+  setLoading(true)
+  setError('')
 
-           setInsight({
-            summary: result.summary || '',
-            kpis: result.kpis || [],
-            recommendations: result.recommendations || [],
-            chartData: result.chartData || [],
-            sources: result.sources || [],
-    })
+  try {
+    const result = await runAnalyzeApi(query, uploadedFileIds)
 
-setSuggestedQuestions(result.suggestedQuestions || [])
+    setInsight(prev => ({
+      ...prev,
+      summary: result.summary || prev.summary,
+      kpis: result.kpis?.length ? result.kpis : prev.kpis,
+      chartData: result.chartData?.length ? result.chartData : prev.chartData,
+      sources: result.sources || prev.sources
+    }))
 
-    } catch (err) {
-      console.error(err)
-      setError('Analysis failed. Please try again.')
-    } finally {
-      setLoading(false)
-    }
+    setSuggestedQuestions(result.suggestedQuestions || [])
+
+  } catch (err) {
+    console.error(err)
+    setError('Analysis failed. Please try again.')
+  } finally {
+    setLoading(false)
   }
+}
+
 
   const formatSize = (bytes) => {
     if (bytes === 0) return '0 B'
@@ -190,7 +192,9 @@ setSuggestedQuestions(result.suggestedQuestions || [])
 
   const kpisToShow = insight.kpis || []
 
- const chartPoints = insight.chartData || []
+const chartPoints = Array.isArray(insight.chartData)
+  ? insight.chartData
+  : [];
 
 
   const recommendationsToShow =
@@ -352,28 +356,28 @@ setSuggestedQuestions(result.suggestedQuestions || [])
               <h3>KPI Metric Cards</h3>
               <button className="link-btn">Show seasonal trends</button>
             </div>
+
             <div className="kpi-cards">
+              {Array.isArray(kpisToShow) && kpisToShow.length > 0 ? (
+                kpisToShow.map((kpi, idx) => (
+                  <div
+                    key={kpi.label}
+                    className={`kpi-card ${idx === 0 ? 'primary' : idx === 2 ? 'subtle' : ''}`}
+                  >
+                    <span className="icon-box">📊</span>
+                    <div>
+                      <p className="kpi-value">{kpi.value}</p>
+                      <p className="kpi-label">{kpi.label}</p>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p style={{ opacity: 0.6 }}>
+                  No KPIs yet — upload a file or run an analysis.
+                </p>
+              )}
+</div>
 
-          {(!kpisToShow || kpisToShow.length === 0) ? (
-            <p style={{ opacity: 0.6 }}>
-              No KPIs yet — upload a file or ask a question.
-            </p>
-          ) : (
-            kpisToShow.map((kpi, idx) => (
-              <div
-                key={kpi.label}
-                className={`kpi-card ${idx === 0 ? 'primary' : idx === 2 ? 'subtle' : ''}`}
-              >
-                <span className="icon-box">📊</span>
-                <div>
-                  <p className="kpi-value">{kpi.value}</p>
-                  <p className="kpi-label">{kpi.label}</p>
-                </div>
-              </div>
-            ))
-          )}
-
-        </div> 
 
 
             {suggestedQuestions.length > 0 && (
@@ -453,21 +457,26 @@ setSuggestedQuestions(result.suggestedQuestions || [])
 
 
 
+
               <div className="chart-section">
                 <div className="chart-section-header">
-                  <h4>Company Sales (Past 12 Months)</h4>
+
+                  
+                <h4>
+                  {insight.chartTitle || "Upload data to see trends"}
+                </h4>
+                  
                 </div>
-                  <div className="chart">
 
-                {(!chartPoints || chartPoints.length === 0) ? (
-                  <p style={{ opacity: 0.6 }}>
-                    No chart data available yet.
-                  </p>
-                ) : (
-                  <Chart points={chartPoints} />
-                )}
-
-              </div>
+                 <div className="chart">
+                  {Array.isArray(chartPoints) && chartPoints.length > 0 ? (
+                    <Chart points={chartPoints} />
+                  ) : (
+                    <p style={{ opacity: 0.6 }}>
+                      No chart data available yet.
+                    </p>
+                  )}
+                </div>
 
 
                 <div className="chart-legend">
@@ -517,98 +526,119 @@ setSuggestedQuestions(result.suggestedQuestions || [])
     </div>
   )
 }
+function Chart({ points = [] }) {
+  // ---- SAFETY NET so app NEVER crashes ----
+  if (!Array.isArray(points) || points.length === 0) {
+    return (
+      <p style={{ opacity: 0.6 }}>
+        No chart data available yet.
+      </p>
+    );
+  }
 
-function Chart({ points }) {
-  const viewWidth = 760
-  const viewHeight = 360
-  const paddingX = 30
-  const paddingY = 28
-  const innerWidth = viewWidth - paddingX * 2
-  const innerHeight = viewHeight - paddingY * 2
-  const maxValue = Math.max(...points.map((p) => p.value)) || 1
-  const minValue = Math.min(...points.map((p) => p.value)) || 0
-  const range = Math.max(maxValue - minValue, 1)
-  const stepX = innerWidth / Math.max(points.length - 1, 1)
-  const yLabel = 'Revenue ($K)'
-  const xLabel = 'Month'
+  // Normalize missing fields
+  const safePoints = points
+    .filter(p => p && typeof p.value === "number")
+    .map((p, i) => ({
+      label: p.label || `Point ${i + 1}`,
+      value: p.value
+    }));
 
-  const pathPoints = points
+  if (safePoints.length === 0) {
+    return (
+      <p style={{ opacity: 0.6 }}>
+        No valid chart data found.
+      </p>
+    );
+  }
+
+  const viewWidth = 760;
+  const viewHeight = 360;
+  const paddingX = 30;
+  const paddingY = 28;
+  const innerWidth = viewWidth - paddingX * 2;
+  const innerHeight = viewHeight - paddingY * 2;
+
+  const maxValue = Math.max(...safePoints.map(p => p.value));
+  const minValue = Math.min(...safePoints.map(p => p.value));
+  const range = Math.max(maxValue - minValue, 1);
+
+  const stepX = innerWidth / Math.max(safePoints.length - 1, 1);
+
+  const pathPoints = safePoints
     .map((p, idx) => {
-      const x = paddingX + idx * stepX
-      const y = paddingY + innerHeight - ((p.value - minValue) / range) * innerHeight
-      return `${x},${y}`
+      const x = paddingX + idx * stepX;
+      const y =
+        paddingY +
+        innerHeight -
+        ((p.value - minValue) / range) * innerHeight;
+      return `${x},${y}`;
     })
-    .join(' ')
+    .join(" ");
 
   const areaPath = `
     M ${paddingX} ${paddingY + innerHeight}
     L ${pathPoints}
     L ${paddingX + innerWidth} ${paddingY + innerHeight}
     Z
-  `
+  `;
 
   return (
     <svg
       className="chart-svg"
       viewBox={`0 0 ${viewWidth} ${viewHeight}`}
       preserveAspectRatio="none"
-      role="img"
-      aria-label="Revenue trend chart"
     >
       <g className="grid-lines">
-        {[0, 0.25, 0.5, 0.75, 1].map((fraction) => (
+        {[0, 0.25, 0.5, 0.75, 1].map(frac => (
           <line
-            key={fraction}
+            key={frac}
             x1="0"
-            y1={paddingY + innerHeight * fraction}
+            y1={paddingY + innerHeight * frac}
             x2={viewWidth}
-            y2={paddingY + innerHeight * fraction}
+            y2={paddingY + innerHeight * frac}
           />
         ))}
       </g>
+
       <path className="chart-area" d={areaPath} />
       <polyline className="chart-line" points={pathPoints} />
-      {points.map((point, idx) => (
-        <g key={point.label} className="chart-point">
-          <circle
-            cx={paddingX + idx * stepX}
-            cy={paddingY + innerHeight - ((point.value - minValue) / range) * innerHeight}
-            r="6"
-          />
-        </g>
+
+      {safePoints.map((p, idx) => (
+        <circle
+          key={idx}
+          cx={paddingX + idx * stepX}
+          cy={
+            paddingY +
+            innerHeight -
+            ((p.value - minValue) / range) * innerHeight
+          }
+          r="6"
+        />
       ))}
+
       <g className="axis-labels">
-        {points.map((point, idx) => (
+        {safePoints.map((p, idx) => (
           <text
-            key={point.label}
+            key={idx}
             x={paddingX + idx * stepX}
-            y={paddingY + innerHeight + 20}
-            textAnchor="middle"
+            y={paddingY + innerHeight + 28}
+            textAnchor="end"
+            transform={`rotate(-35 ${
+              paddingX + idx * stepX
+            } ${paddingY + innerHeight + 28})`}
+            style={{ fontSize: "11px" }}
           >
-            {point.label}
+            {(p.label || "").length > 12
+              ? p.label.slice(0, 12) + "…"
+              : p.label}
           </text>
         ))}
       </g>
-
-      <text
-        className="axis-title y-axis-title"
-        x={-viewHeight / 2}
-        y={14}
-        transform="rotate(-90)"
-        textAnchor="middle"
-      >
-        {yLabel}
-      </text>
-      <text
-        className="axis-title x-axis-title"
-        x={paddingX + innerWidth / 2}
-        y={viewHeight - 4}
-        textAnchor="middle"
-      >
-        {xLabel}
-      </text>
     </svg>
-  )
+  );
 }
 
-export default App
+
+
+export default App;
